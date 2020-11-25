@@ -1,0 +1,18 @@
+version: '2'
+services:
+  demo:
+    image: symfony-demo:1.0.0
+    ports:
+      - '8000:8000'
+    environment:
+      - SYMFONY_PROJECT_NAME=demo
+
+  build:
+    image: 'bitnami/symfony:1'
+    ports:
+      - '8000:8000'
+    environment:
+      - APP_ENV=prod
+      - SYMFONY_PROJECT_NAME=demo
+    volumes:
+      - '.:/app'

@@ -1,0 +1,21 @@
+AppRepository:
+  Type: AWS::ECR::Repository
+  Properties: 
+    RepositoryName: "symfony-demo"
+    RepositoryPolicyText: 
+      Version: "2012-10-17"
+      Statement: 
+        - 
+          Sid: AllowPushPull
+          Effect: Allow
+          Principal: 
+            AWS: 
+              - "arn:aws:iam::381375271776:user/aram"
+          Action: 
+            - "ecr:GetDownloadUrlForLayer"
+            - "ecr:BatchGetImage"
+            - "ecr:BatchCheckLayerAvailability"
+            - "ecr:PutImage"
+            - "ecr:InitiateLayerUpload"
+            - "ecr:UploadLayerPart"
+            - "ecr:CompleteLayerUpload"
