@@ -5,15 +5,15 @@ Parameters:
   VpcId:
     Type: String
     Default: vpc-067a93d13b158ee71
-    Description: The name of the environment to add this service to
+    Description: VPC ID, this should be refactored to retrieve from vpc provisioning stack
   ClusterName:
     Type: String
     Default: ecs
-    Description: The name of the environment to add this service to
+    Description: ECS Cluster Name, this should be refactored to retrieve from ecs provisioning stack
   PublicListener:
     Type: String
     Default: arn:aws:elasticloadbalancing:eu-west-1:381375271776:listener/app/ecs-services/fef2e259e9d52626/a9aeed5938dfc255
-    Description: The name of the environment to add this service to
+    Description: This should be refactored to retrieve from load balancer provisioning stack
 
   EnvironmentName:
     Type: String
@@ -75,11 +75,6 @@ Resources:
       Family: !Ref 'ServiceName'
       Cpu: !Ref 'ContainerCpu'
       Memory: !Ref 'ContainerMemory'
-      # TaskRoleArn:
-      #   Fn::If:
-      #     - 'HasCustomRole'
-      #     - !Ref 'Role'
-      #     - !Ref "AWS::NoValue"
       ContainerDefinitions:
         - Name: !Ref 'ServiceName'
           Cpu: !Ref 'ContainerCpu'
@@ -94,10 +89,12 @@ Resources:
               awslogs-group: !Sub ${EnvironmentName}-service-${ServiceName}
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: !Ref 'ServiceName'
+          Environment:
+            - Name: SYMFONY_PROJECT_NAME
+              Value: demo
 
   Service:
     Type: AWS::ECS::Service
-    # DependsOn: LoadBalancerRule
     Properties:
       ServiceName: !Ref 'ServiceName'
       Cluster: !Ref ClusterName
@@ -125,7 +122,6 @@ Resources:
       UnhealthyThresholdCount: 10
       VpcId: !Ref 'VpcId'
 
-  # Create a rule on the load balancer for routing traffic to the target group
   LoadBalancerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
@@ -137,156 +133,3 @@ Resources:
           Values: [!Ref 'Path']
       ListenerArn: !Ref  PublicListener
       Priority: !Ref 'Priority'
-
-  # # Enable autoscaling for this service
-  # ScalableTarget:
-  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
-  #   DependsOn: Service
-  #   Properties:
-  #     ServiceNamespace: 'ecs'
-  #     ScalableDimension: 'ecs:service:DesiredCount'
-  #     ResourceId:
-  #       Fn::Join:
-  #         - '/'
-  #         - - service
-  #           - Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
-  #           - !Ref 'ServiceName'
-  #     MinCapacity: 2
-  #     MaxCapacity: 10
-  #     RoleARN:
-  #       Fn::ImportValue: !Sub ${EnvironmentName}:AutoscalingRole
-
-  # Create scaling policies for the service
-  # ScaleDownPolicy:
-  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  #   DependsOn: ScalableTarget
-  #   Properties:
-  #     PolicyName:
-  #       Fn::Join:
-  #         - '/'
-  #         - - scale
-  #           - !Ref 'EnvironmentName'
-  #           - !Ref 'ServiceName'
-  #           - down
-  #     PolicyType: StepScaling
-  #     ResourceId:
-  #       Fn::Join:
-  #         - '/'
-  #         - - service
-  #           - Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
-  #           - !Ref 'ServiceName'
-  #     ScalableDimension: 'ecs:service:DesiredCount'
-  #     ServiceNamespace: 'ecs'
-  #     StepScalingPolicyConfiguration:
-  #       AdjustmentType: 'ChangeInCapacity'
-  #       StepAdjustments:
-  #         - MetricIntervalUpperBound: 0
-  #           ScalingAdjustment: -1
-  #       MetricAggregationType: 'Average'
-  #       Cooldown: 60
-
-  # ScaleUpPolicy:
-  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  #   DependsOn: ScalableTarget
-  #   Properties:
-  #     PolicyName:
-  #       Fn::Join:
-  #         - '/'
-  #         - - scale
-  #           - !Ref 'EnvironmentName'
-  #           - !Ref 'ServiceName'
-  #           - up
-  #     PolicyType: StepScaling
-  #     ResourceId:
-  #       Fn::Join:
-  #         - '/'
-  #         - - service
-  #           - Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
-  #           - !Ref 'ServiceName'
-  #     ScalableDimension: 'ecs:service:DesiredCount'
-  #     ServiceNamespace: 'ecs'
-  #     StepScalingPolicyConfiguration:
-  #       AdjustmentType: 'ChangeInCapacity'
-  #       StepAdjustments:
-  #         - MetricIntervalLowerBound: 0
-  #           MetricIntervalUpperBound: 15
-  #           ScalingAdjustment: 1
-  #         - MetricIntervalLowerBound: 15
-  #           MetricIntervalUpperBound: 25
-  #           ScalingAdjustment: 2
-  #         - MetricIntervalLowerBound: 25
-  #           ScalingAdjustment: 3
-  #       MetricAggregationType: 'Average'
-  #       Cooldown: 60
-
-  # # Create alarms to trigger these policies
-  # LowCpuUsageAlarm:
-  #   Type: AWS::CloudWatch::Alarm
-  #   Properties:
-  #     AlarmName:
-  #       Fn::Join:
-  #         - '-'
-  #         - - low-cpu
-  #           - !Ref 'EnvironmentName'
-  #           - !Ref 'ServiceName'
-  #     AlarmDescription:
-  #       Fn::Join:
-  #         - ' '
-  #         - - "Low CPU utilization for service"
-  #           - !Ref 'ServiceName'
-  #           - "in environment"
-  #           - !Ref 'EnvironmentName'
-  #     MetricName: CPUUtilization
-  #     Namespace: AWS/ECS
-  #     Dimensions:
-  #       - Name: ServiceName
-  #         Value: !Ref 'ServiceName'
-  #       - Name: ClusterName
-  #         Value:
-  #           Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
-  #     Statistic: Average
-  #     Period: 60
-  #     EvaluationPeriods: 1
-  #     Threshold: 20
-  #     ComparisonOperator: LessThanOrEqualToThreshold
-  #     AlarmActions:
-  #       - !Ref ScaleDownPolicy
-
-  # HighCpuUsageAlarm:
-  #   Type: AWS::CloudWatch::Alarm
-  #   Properties:
-  #     AlarmName:
-  #       Fn::Join:
-  #         - '-'
-  #         - - high-cpu
-  #           - !Ref 'EnvironmentName'
-  #           - !Ref 'ServiceName'
-  #     AlarmDescription:
-  #       Fn::Join:
-  #         - ' '
-  #         - - "High CPU utilization for service"
-  #           - !Ref 'ServiceName'
-  #           - "in environment"
-  #           - !Ref 'EnvironmentName'
-  #     MetricName: CPUUtilization
-  #     Namespace: AWS/ECS
-  #     Dimensions:
-  #       - Name: ServiceName
-  #         Value: !Ref 'ServiceName'
-  #       - Name: ClusterName
-  #         Value:
-  #           Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
-  #     Statistic: Average
-  #     Period: 60
-  #     EvaluationPeriods: 1
-  #     Threshold: 70
-  #     ComparisonOperator: GreaterThanOrEqualToThreshold
-  #     AlarmActions:
-  #       - !Ref ScaleUpPolicy
-
-# Outputs:
-#   ApiEndpoint:
-#     Description: Symfony Demo App Endpoint
-#     Value: !Join ['', ['http://', !ImportValue 'DomainName', '/']]
-#     Export:
-#       Name: 'SymfonyDemoAppEndpoint'

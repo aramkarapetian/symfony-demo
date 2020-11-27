@@ -15,6 +15,5 @@ prepare-infrastructure:
 
 deploy:
 	aws cloudformation create-stack --stack-name surroundings --template-body file://${PWD}/formation/surroundings.yml
-	# aws cloudformation create-stack --stack-name symfony-demo-iam --template-body file://${PWD}/formation/iam.yml --capabilities CAPABILITY_IAM
-	# aws cloudformation delete-stack --stack-name symfony-demo-app
-	aws cloudformation create-stack --stack-name symfony-demo-app --template-body file://${PWD}/formation/app.yml
+	aws cloudformation create-stack --stack-name symfony-demo-iam --template-body file://${PWD}/formation/iam.yml --capabilities CAPABILITY_IAM
+	aws cloudformation update-stack --stack-name symfony-demo-app --template-body file://${PWD}/formation/app.yml
