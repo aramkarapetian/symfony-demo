@@ -1,89 +1,292 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Symfony Demo App
 
+Parameters:
+  VpcId:
+    Type: String
+    Default: vpc-067a93d13b158ee71
+    Description: The name of the environment to add this service to
+  ClusterName:
+    Type: String
+    Default: ecs
+    Description: The name of the environment to add this service to
+  PublicListener:
+    Type: String
+    Default: arn:aws:elasticloadbalancing:eu-west-1:381375271776:listener/app/ecs-services/fef2e259e9d52626/a9aeed5938dfc255
+    Description: The name of the environment to add this service to
+
+  EnvironmentName:
+    Type: String
+    Default: production
+    Description: The name of the environment to add this service to
+  ServiceName:
+    Type: String
+    Default: nginx
+    Description: A name for the service
+  ImageUrl:
+    Type: String
+    Default: 381375271776.dkr.ecr.eu-west-1.amazonaws.com/symfony-demo:v1
+    # Default: nginx
+    Description: The url of a docker image that contains the application process that
+                 will handle the traffic for this service
+  ContainerPort:
+    Type: Number
+    Default: 8000
+    Description: What port number the application inside the docker container is binding to
+  ContainerCpu:
+    Type: Number
+    Default: 256
+    Description: How much CPU to give the container. 1024 is 1 CPU
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: How much memory in megabytes to give the container
+  Path:
+    Type: String
+    Default: "*"
+    Description: A path on the public load balancer that this service
+                 should be connected to. Use * to send all load balancer
+                 traffic to this service.
+  Priority:
+    Type: Number
+    Default: 1
+    Description: The priority for the routing rule added to the load balancer.
+                 This only applies if your have multiple services which have been
+                 assigned to different paths on the load balancer.
+  DesiredCount:
+    Type: Number
+    Default: 2
+    Description: How many copies of the service task to run
+  Role:
+    Type: String
+    Default: ""
+    Description: (Optional) An IAM role to give the service's containers if the code within needs to
+                 access other AWS resources like S3 buckets, DynamoDB tables, etc
+
 Resources:
-  Task:
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${EnvironmentName}-service-${ServiceName}
+
+  TaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: apis
-      Cpu: 256
-      Memory: 512
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      ExecutionRoleArn: arn:aws:iam::381375271776:role/ecs-ECSRole-eu-west-1
+      Family: !Ref 'ServiceName'
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      # TaskRoleArn:
+      #   Fn::If:
+      #     - 'HasCustomRole'
+      #     - !Ref 'Role'
+      #     - !Ref "AWS::NoValue"
       ContainerDefinitions:
-        - Name: symfony-demo
-          Image: 381375271776.dkr.ecr.eu-west-1.amazonaws.com/symfony-demo:v1
-          Cpu: 256
-          Memory: 512
+        - Name: !Ref 'ServiceName'
+          Cpu: !Ref 'ContainerCpu'
+          Memory: !Ref 'ContainerMemory'
+          Image: !Ref 'ImageUrl'
           PortMappings:
-            - ContainerPort: 4567
+            - ContainerPort: !Ref 'ContainerPort'
               Protocol: tcp
           LogConfiguration:
-            LogDriver: awslogs
+            LogDriver: 'awslogs'
             Options:
-              awslogs-group: 'apis'
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: 'symfony-demo'
+              awslogs-group: !Sub ${EnvironmentName}-service-${ServiceName}
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: !Ref 'ServiceName'
 
   Service:
     Type: AWS::ECS::Service
-    DependsOn: ListenerRule
+    # DependsOn: LoadBalancerRule
     Properties:
-      ServiceName: books-service
-      TaskDefinition: !Ref Task
-      Cluster: 'ecs'
-      LaunchType: FARGATE
-      DesiredCount: 2
+      ServiceName: !Ref 'ServiceName'
+      Cluster: !Ref ClusterName
       DeploymentConfiguration:
         MaximumPercent: 200
-        MinimumHealthyPercent: 70
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
-          Subnets:
-            - subnet-017275048f9e5c6cd
-            - subnet-0b89bc5727b3ccc40
-          SecurityGroups:
-            - 'sg-0d651168521a746c8'
+        MinimumHealthyPercent: 75
+      DesiredCount: !Ref 'DesiredCount'
+      TaskDefinition: !Ref 'TaskDefinition'
       LoadBalancers:
-        - ContainerName: symfony-demo
-          ContainerPort: 4567
-          TargetGroupArn: !Ref TargetGroup
+        - ContainerName: !Ref 'ServiceName'
+          ContainerPort: !Ref 'ContainerPort'
+          TargetGroupArn: !Ref 'TargetGroup'
 
   TargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: books-tg
-      VpcId: vpc-067a93d13b158ee71
-      Port: 80
-      Protocol: HTTP
-      Matcher:
-        HttpCode: 200-299
-      HealthCheckIntervalSeconds: 10
+      HealthCheckIntervalSeconds: 60
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 10
-      TargetType: ip
+      HealthCheckTimeoutSeconds: 50
+      HealthyThresholdCount: 2
+      Name: !Ref 'ServiceName'
+      Port: !Ref 'ContainerPort'
+      Protocol: HTTP
+      UnhealthyThresholdCount: 10
+      VpcId: !Ref 'VpcId'
 
-  ListenerRule:
+  # Create a rule on the load balancer for routing traffic to the target group
+  LoadBalancerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      ListenerArn: !ImportValue 'Listener'
-      Priority: 2
+      Actions:
+        - TargetGroupArn: !Ref 'TargetGroup'
+          Type: 'forward'
       Conditions:
         - Field: path-pattern
-          Values:
-            - /*
-      Actions:
-        - TargetGroupArn: !Ref TargetGroup
-          Type: forward
+          Values: [!Ref 'Path']
+      ListenerArn: !Ref  PublicListener
+      Priority: !Ref 'Priority'
 
-Outputs:
-  ApiEndpoint:
-    Description: Symfony Demo App Endpoint
-    Value: !Join ['', ['http://', !ImportValue 'DomainName', '/']]
-    Export:
-      Name: 'SymfonyDemoAppEndpoint'
+  # # Enable autoscaling for this service
+  # ScalableTarget:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   DependsOn: Service
+  #   Properties:
+  #     ServiceNamespace: 'ecs'
+  #     ScalableDimension: 'ecs:service:DesiredCount'
+  #     ResourceId:
+  #       Fn::Join:
+  #         - '/'
+  #         - - service
+  #           - Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
+  #           - !Ref 'ServiceName'
+  #     MinCapacity: 2
+  #     MaxCapacity: 10
+  #     RoleARN:
+  #       Fn::ImportValue: !Sub ${EnvironmentName}:AutoscalingRole
+
+  # Create scaling policies for the service
+  # ScaleDownPolicy:
+  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  #   DependsOn: ScalableTarget
+  #   Properties:
+  #     PolicyName:
+  #       Fn::Join:
+  #         - '/'
+  #         - - scale
+  #           - !Ref 'EnvironmentName'
+  #           - !Ref 'ServiceName'
+  #           - down
+  #     PolicyType: StepScaling
+  #     ResourceId:
+  #       Fn::Join:
+  #         - '/'
+  #         - - service
+  #           - Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
+  #           - !Ref 'ServiceName'
+  #     ScalableDimension: 'ecs:service:DesiredCount'
+  #     ServiceNamespace: 'ecs'
+  #     StepScalingPolicyConfiguration:
+  #       AdjustmentType: 'ChangeInCapacity'
+  #       StepAdjustments:
+  #         - MetricIntervalUpperBound: 0
+  #           ScalingAdjustment: -1
+  #       MetricAggregationType: 'Average'
+  #       Cooldown: 60
+
+  # ScaleUpPolicy:
+  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  #   DependsOn: ScalableTarget
+  #   Properties:
+  #     PolicyName:
+  #       Fn::Join:
+  #         - '/'
+  #         - - scale
+  #           - !Ref 'EnvironmentName'
+  #           - !Ref 'ServiceName'
+  #           - up
+  #     PolicyType: StepScaling
+  #     ResourceId:
+  #       Fn::Join:
+  #         - '/'
+  #         - - service
+  #           - Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
+  #           - !Ref 'ServiceName'
+  #     ScalableDimension: 'ecs:service:DesiredCount'
+  #     ServiceNamespace: 'ecs'
+  #     StepScalingPolicyConfiguration:
+  #       AdjustmentType: 'ChangeInCapacity'
+  #       StepAdjustments:
+  #         - MetricIntervalLowerBound: 0
+  #           MetricIntervalUpperBound: 15
+  #           ScalingAdjustment: 1
+  #         - MetricIntervalLowerBound: 15
+  #           MetricIntervalUpperBound: 25
+  #           ScalingAdjustment: 2
+  #         - MetricIntervalLowerBound: 25
+  #           ScalingAdjustment: 3
+  #       MetricAggregationType: 'Average'
+  #       Cooldown: 60
+
+  # # Create alarms to trigger these policies
+  # LowCpuUsageAlarm:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     AlarmName:
+  #       Fn::Join:
+  #         - '-'
+  #         - - low-cpu
+  #           - !Ref 'EnvironmentName'
+  #           - !Ref 'ServiceName'
+  #     AlarmDescription:
+  #       Fn::Join:
+  #         - ' '
+  #         - - "Low CPU utilization for service"
+  #           - !Ref 'ServiceName'
+  #           - "in environment"
+  #           - !Ref 'EnvironmentName'
+  #     MetricName: CPUUtilization
+  #     Namespace: AWS/ECS
+  #     Dimensions:
+  #       - Name: ServiceName
+  #         Value: !Ref 'ServiceName'
+  #       - Name: ClusterName
+  #         Value:
+  #           Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
+  #     Statistic: Average
+  #     Period: 60
+  #     EvaluationPeriods: 1
+  #     Threshold: 20
+  #     ComparisonOperator: LessThanOrEqualToThreshold
+  #     AlarmActions:
+  #       - !Ref ScaleDownPolicy
+
+  # HighCpuUsageAlarm:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     AlarmName:
+  #       Fn::Join:
+  #         - '-'
+  #         - - high-cpu
+  #           - !Ref 'EnvironmentName'
+  #           - !Ref 'ServiceName'
+  #     AlarmDescription:
+  #       Fn::Join:
+  #         - ' '
+  #         - - "High CPU utilization for service"
+  #           - !Ref 'ServiceName'
+  #           - "in environment"
+  #           - !Ref 'EnvironmentName'
+  #     MetricName: CPUUtilization
+  #     Namespace: AWS/ECS
+  #     Dimensions:
+  #       - Name: ServiceName
+  #         Value: !Ref 'ServiceName'
+  #       - Name: ClusterName
+  #         Value:
+  #           Fn::ImportValue: !Sub ${EnvironmentName}:ClusterName
+  #     Statistic: Average
+  #     Period: 60
+  #     EvaluationPeriods: 1
+  #     Threshold: 70
+  #     ComparisonOperator: GreaterThanOrEqualToThreshold
+  #     AlarmActions:
+  #       - !Ref ScaleUpPolicy
+
+# Outputs:
+#   ApiEndpoint:
+#     Description: Symfony Demo App Endpoint
+#     Value: !Join ['', ['http://', !ImportValue 'DomainName', '/']]
+#     Export:
+#       Name: 'SymfonyDemoAppEndpoint'
